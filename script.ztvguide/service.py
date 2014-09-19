@@ -27,10 +27,12 @@ class Service(object):
     def __init__(self):
         self.database = source.Database()
         self.database.initialize(self.onInit)
+        self.source = source.XMLTVPushSource(self.database)
 
     def onInit(self, success):
         if success:
-            self.database.updateChannelAndProgramListCaches(self.onCachesUpdated)
+            self.source.startSync()
+            # self.database.updateChannelAndProgramListCaches(self.onCachesUpdated)
         else:
             self.database.close()
 

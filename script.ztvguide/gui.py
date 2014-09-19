@@ -58,7 +58,7 @@ KEY_NAV_BACK = 92
 KEY_CONTEXT_MENU = 117
 KEY_HOME = 159
 
-CHANNELS_PER_PAGE = 9
+CHANNELS_PER_PAGE = 13
 
 HALF_HOUR = datetime.timedelta(minutes=30)
 
@@ -147,6 +147,9 @@ class TVGuide(xbmcgui.WindowXML):
         self.viewStartDate -= datetime.timedelta(minutes=self.viewStartDate.minute % 30,
                                                  seconds=self.viewStartDate.second)
 
+        self.channelsDrawn = {}
+        self.channelRows = [[] for i in range(0, CHANNELS_PER_PAGE)]
+
     def getControl(self, controlId):
         try:
             return super(TVGuide, self).getControl(controlId)
@@ -190,6 +193,7 @@ class TVGuide(xbmcgui.WindowXML):
 
         try:
             self.database = src.Database()
+            self.source = src.XMLTVPushSource(self.database, self)
         except src.SourceNotConfiguredException:
             self.onSourceNotConfigured()
             self.close()
@@ -237,19 +241,23 @@ class TVGuide(xbmcgui.WindowXML):
                 self._hideOsd()
 
         elif action.getId() == ACTION_PAGE_UP:
+            print " TVGuide > onActionOSDMode ACTION_PAGE_UP "
             self._channelUp()
             self._showOsd()
 
         elif action.getId() == ACTION_PAGE_DOWN:
+            print " TVGuide > onActionOSDMode ACTION_PAGE_DOWN "
             self._channelDown()
             self._showOsd()
 
         elif action.getId() == ACTION_UP:
+            print " TVGuide > onActionOSDMode ACTION_UP "
             self.osdChannel = self.database.getPreviousChannel(self.osdChannel)
             self.osdProgram = self.database.getCurrentProgram(self.osdChannel)
             self._showOsd()
 
         elif action.getId() == ACTION_DOWN:
+            print " TVGuide > onActionOSDMode ACTION_DOWN "
             self.osdChannel = self.database.getNextChannel(self.osdChannel)
             self.osdProgram = self.database.getCurrentProgram(self.osdChannel)
             self._showOsd()
@@ -271,9 +279,9 @@ class TVGuide(xbmcgui.WindowXML):
             self.close()
             return
 
-        elif action.getId() == ACTION_MOUSE_MOVE:
-            self._showControl(self.C_MAIN_MOUSE_CONTROLS)
-            return
+        #elif action.getId() == ACTION_MOUSE_MOVE:
+        #    self._showControl(self.C_MAIN_MOUSE_CONTROLS)
+        #    return
 
         elif action.getId() == KEY_CONTEXT_MENU:
             if self.player.isPlaying():
@@ -309,22 +317,26 @@ class TVGuide(xbmcgui.WindowXML):
         elif action.getId() == ACTION_PREV_ITEM:
             self._previousDay()
         elif action.getId() == ACTION_PAGE_UP:
+            print " TVGuide > onActionEPGMode > ACTION_PAGE_UP "
             self._moveUp(CHANNELS_PER_PAGE)
         elif action.getId() == ACTION_PAGE_DOWN:
+            print " TVGuide > onActionEPGMode > ACTION_PAGE_DOWN "
             self._moveDown(CHANNELS_PER_PAGE)
         elif action.getId() == ACTION_MOUSE_WHEEL_UP:
+            print " TVGuide > onActionEPGMode > ACTION_MOUSE_WHEEL_UP "
             self._moveUp(scrollEvent=True)
         elif action.getId() == ACTION_MOUSE_WHEEL_DOWN:
+            print " TVGuide > onActionEPGMode > ACTION_MOUSE_WHEEL_DOWN "
             self._moveDown(scrollEvent=True)
         elif action.getId() == KEY_HOME:
             self.viewStartDate = datetime.datetime.today()
             self.viewStartDate -= datetime.timedelta(minutes=self.viewStartDate.minute % 30,
                                                      seconds=self.viewStartDate.second)
             self.onRedrawEPG(self.channelIdx, self.viewStartDate)
-        elif action.getId() in [KEY_CONTEXT_MENU] and controlInFocus is not None:
-            program = self._getProgramFromControl(controlInFocus)
-            if program is not None:
-                self._showContextMenu(program)
+        #elif action.getId() in [KEY_CONTEXT_MENU] and controlInFocus is not None:
+        #    program = self._getProgramFromControl(controlInFocus)
+        #    if program is not None:
+        #        self._showContextMenu(program)
 
     @buggalo.buggalo_try_except({'method': 'TVGuide.onClick'})
     def onClick(self, controlId):
@@ -379,6 +391,8 @@ class TVGuide(xbmcgui.WindowXML):
                     self.playChannel(program.channel)
 
     def _showContextMenu(self, program):
+        pass
+        """
         self._hideControl(self.C_MAIN_MOUSE_CONTROLS)
         d = PopupMenu(self.database, program, not program.notificationScheduled)
         d.doModal()
@@ -409,6 +423,7 @@ class TVGuide(xbmcgui.WindowXML):
 
         elif buttonClicked == PopupMenu.C_POPUP_QUIT:
             self.close()
+        """
 
     def setFocusId(self, controlId):
         control = self.getControl(controlId)
@@ -602,6 +617,9 @@ class TVGuide(xbmcgui.WindowXML):
             return  # ignore redraw request while redrawing
         debug('onRedrawEPG')
 
+        self.startTime = startTime
+        self.endTime = startTime + datetime.timedelta(hours=2)
+
         self.redrawingEPG = True
         self.mode = MODE_EPG
         self._showControl(self.C_MAIN_EPG)
@@ -615,110 +633,215 @@ class TVGuide(xbmcgui.WindowXML):
         # remove existing controls
         self._clearEpg()
 
-        try:
-            self.channelIdx, channels, programs = self.database.getEPGView(channelStart, startTime, self.onSourceProgressUpdate, clearExistingProgramList=False)
-        except src.SourceException:
-            self.onEPGLoadError()
-            return
+        self.channelIdx, channels, programs = self.database.getEPGView(channelStart, startTime, self.onSourceProgressUpdate, clearExistingProgramList=False)
+        print "database.getEPGView ----------------------------------------------- " + str(self.channelIdx) + repr(channels) + repr(programs)
 
-        channelsWithoutPrograms = list(channels)
+        if channels:
+            channelsWithoutPrograms = list(channels)
 
-        # date and time row
-        self.setControlLabel(self.C_MAIN_DATE, self.formatDate(self.viewStartDate))
-        for col in range(1, 5):
-            self.setControlLabel(4000 + col, self.formatTime(startTime))
-            startTime += HALF_HOUR
+            # date and time row
+            self.setControlLabel(self.C_MAIN_DATE, self.formatDate(self.viewStartDate))
+            for col in range(1, 5):
+                self.setControlLabel(4000 + col, self.formatTime(startTime))
+                startTime += HALF_HOUR
 
-        if programs is None:
-            self.onEPGLoadError()
-            return
+            #if programs is None:
+            #    self.onEPGLoadError()
+            #    return
 
-        # set channel logo or text
-        for idx in range(0, CHANNELS_PER_PAGE):
-            if idx >= len(channels):
+            # set channel logo or text
+
+            for idx in range(0, CHANNELS_PER_PAGE):
+                if idx >= len(channels):
+                    self.channelsDrawn[idx] = {'idx': idx, 'data': None}
+                    self.setControlImage(4110 + idx, ' ')
+                    self.setControlLabel(4010 + idx, ' ')
+                else:
+                    channel = channels[idx]
+                    self.channelsDrawn[channel.id] = {'idx': idx, 'data': channel}
+                    self.setControlLabel(4010 + idx, channel.title)
+                    if channel.logo is not None:
+                        self.setControlImage(4110 + idx, channel.logo)
+                    else:
+                        self.setControlImage(4110 + idx, ' ')
+
+            for program in programs:
+                idx = channels.index(program.channel)
+                if program.channel in channelsWithoutPrograms:
+                    channelsWithoutPrograms.remove(program.channel)
+
+                startDelta = program.startDate - self.viewStartDate
+                stopDelta = program.endDate - self.viewStartDate
+
+                cellStart = self._secondsToXposition(startDelta.seconds)
+                if startDelta.days < 0:
+                    cellStart = self.epgView.left
+                cellWidth = self._secondsToXposition(stopDelta.seconds) - cellStart
+                if cellStart + cellWidth > self.epgView.right:
+                    cellWidth = self.epgView.right - cellStart
+
+                if cellWidth > 1:
+                    if program.notificationScheduled:
+                        noFocusTexture = 'tvguide-program-red.png'
+                        focusTexture = 'tvguide-program-red-focus.png'
+                    else:
+                        noFocusTexture = 'tvguide-program-grey.png'
+                        focusTexture = 'tvguide-program-grey-focus.png'
+
+                    if cellWidth < 25:
+                        title = ''  # Text will overflow outside the button if it is too narrow
+                    else:
+                        title = program.title
+
+                    control = xbmcgui.ControlButton(
+                        cellStart,
+                        self.epgView.top + self.epgView.cellHeight * idx,
+                        cellWidth - 2,
+                        self.epgView.cellHeight - 2,
+                        title,
+                        noFocusTexture=noFocusTexture,
+                        focusTexture=focusTexture
+                    )
+
+                    self.controlAndProgramList.append(ControlAndProgram(control, program))
+                    self.channelRows[idx].append(control)
+
+            for channel in channelsWithoutPrograms:
+                idx = channels.index(channel)
+
+                control = xbmcgui.ControlButton(
+                    self.epgView.left,
+                    self.epgView.top + self.epgView.cellHeight * idx,
+                    (self.epgView.right - self.epgView.left) - 2,
+                    self.epgView.cellHeight - 2,
+                    strings(NO_PROGRAM_AVAILABLE),
+                    noFocusTexture='tvguide-program-grey.png',
+                    focusTexture='tvguide-program-grey-focus.png'
+                )
+
+                program = src.Program(channel, strings(NO_PROGRAM_AVAILABLE), None, None, None)
+                self.controlAndProgramList.append(ControlAndProgram(control, program))
+                self.channelRows[idx].append(control)
+
+            # add program controls
+            if focusFunction is None:
+                focusFunction = self._findControlAt
+            focusControl = focusFunction(self.focusPoint)
+            controls = [elem.control for elem in self.controlAndProgramList]
+            self.addControls(controls)
+            if focusControl is not None:
+                debug('onRedrawEPG - setFocus %d' % focusControl.getId())
+                self.setFocus(focusControl)
+
+            self.ignoreMissingControlIds.extend([elem.control.getId() for elem in self.controlAndProgramList])
+
+            if focusControl is None and len(self.controlAndProgramList) > 0:
+                self.setFocus(self.controlAndProgramList[0].control)
+
+        self._hideControl(self.C_MAIN_LOADING)
+        self.redrawingEPG = False
+
+    def drawChannelRow(self, channel):
+        print "drawChannelRow -------------> " + str(channel)
+        idx = len(self.channelsDrawn)
+        print "self.channelsDrawn -------------> " + str(self.channelsDrawn)
+        print "idx < CHANNELS_PER_PAGE -------------> " + str(idx < CHANNELS_PER_PAGE)
+        self.redrawingEPG = True
+        #if channel and
+        if idx < CHANNELS_PER_PAGE:
+            print "not channel -------------> " + str(not channel)
+            if not channel:
+                self.channelsDrawn[idx] = {'idx': idx, 'data': channel}
                 self.setControlImage(4110 + idx, ' ')
                 self.setControlLabel(4010 + idx, ' ')
             else:
-                channel = channels[idx]
+                self.channelsDrawn[channel.id] = {'idx': idx, 'data': channel}
                 self.setControlLabel(4010 + idx, channel.title)
                 if channel.logo is not None:
                     self.setControlImage(4110 + idx, channel.logo)
                 else:
                     self.setControlImage(4110 + idx, ' ')
 
-        for program in programs:
-            idx = channels.index(program.channel)
-            if program.channel in channelsWithoutPrograms:
-                channelsWithoutPrograms.remove(program.channel)
-
-            startDelta = program.startDate - self.viewStartDate
-            stopDelta = program.endDate - self.viewStartDate
-
-            cellStart = self._secondsToXposition(startDelta.seconds)
-            if startDelta.days < 0:
-                cellStart = self.epgView.left
-            cellWidth = self._secondsToXposition(stopDelta.seconds) - cellStart
-            if cellStart + cellWidth > self.epgView.right:
-                cellWidth = self.epgView.right - cellStart
-
-            if cellWidth > 1:
-                if program.notificationScheduled:
-                    noFocusTexture = 'tvguide-program-red.png'
-                    focusTexture = 'tvguide-program-red-focus.png'
-                else:
-                    noFocusTexture = 'tvguide-program-grey.png'
-                    focusTexture = 'tvguide-program-grey-focus.png'
-
-                if cellWidth < 25:
-                    title = ''  # Text will overflow outside the button if it is too narrow
-                else:
-                    title = program.title
-
-                control = xbmcgui.ControlButton(
-                    cellStart,
-                    self.epgView.top + self.epgView.cellHeight * idx,
-                    cellWidth - 2,
-                    self.epgView.cellHeight - 2,
-                    title,
-                    noFocusTexture=noFocusTexture,
-                    focusTexture=focusTexture
-                )
-
-                self.controlAndProgramList.append(ControlAndProgram(control, program))
-
-        for channel in channelsWithoutPrograms:
-            idx = channels.index(channel)
-
-            control = xbmcgui.ControlButton(
-                self.epgView.left,
-                self.epgView.top + self.epgView.cellHeight * idx,
-                (self.epgView.right - self.epgView.left) - 2,
-                self.epgView.cellHeight - 2,
-                strings(NO_PROGRAM_AVAILABLE),
-                noFocusTexture='tvguide-program-grey.png',
-                focusTexture='tvguide-program-grey-focus.png'
-            )
-
-            program = src.Program(channel, strings(NO_PROGRAM_AVAILABLE), None, None, None)
-            self.controlAndProgramList.append(ControlAndProgram(control, program))
-
-        # add program controls
-        if focusFunction is None:
-            focusFunction = self._findControlAt
-        focusControl = focusFunction(self.focusPoint)
-        controls = [elem.control for elem in self.controlAndProgramList]
-        self.addControls(controls)
-        if focusControl is not None:
-            debug('onRedrawEPG - setFocus %d' % focusControl.getId())
-            self.setFocus(focusControl)
-
-        self.ignoreMissingControlIds.extend([elem.control.getId() for elem in self.controlAndProgramList])
-
-        if focusControl is None and len(self.controlAndProgramList) > 0:
-            self.setFocus(self.controlAndProgramList[0].control)
-
-        self._hideControl(self.C_MAIN_LOADING)
         self.redrawingEPG = False
+
+
+    def drawProgram(self, program):
+        if program.channel in self.channelsDrawn.keys():
+            program.channel = self.channelsDrawn[program.channel]['data']
+            idx = self.channelsDrawn[program.channel.id]['idx']
+            if idx < CHANNELS_PER_PAGE:
+                #if program is on visible date frame
+                if program.startDate < self.endTime and program.endDate > self.startTime:
+                    self.redrawingEPG = True
+
+                    print "drawProgram ----------------------> " + repr(program)
+                    startDelta = program.startDate - self.viewStartDate
+                    stopDelta = program.endDate - self.viewStartDate
+
+                    cellStart = self._secondsToXposition(startDelta.seconds)
+                    if startDelta.days < 0:
+                        cellStart = self.epgView.left
+                    cellWidth = self._secondsToXposition(stopDelta.seconds) - cellStart
+                    if cellStart + cellWidth > self.epgView.right:
+                        cellWidth = self.epgView.right - cellStart
+
+                    if cellStart < self.epgView.right:
+                        if cellWidth > 1:
+                            if program.notificationScheduled:
+                                noFocusTexture = 'tvguide-program-red.png'
+                                focusTexture = 'tvguide-program-red-focus.png'
+                            else:
+                                noFocusTexture = 'tvguide-program-grey.png'
+                                focusTexture = 'tvguide-program-grey-focus.png'
+
+                            if cellWidth < 25:
+                                title = ''  # Text will overflow outside the button if it is too narrow
+                            else:
+                                title = program.title
+
+                            control = xbmcgui.ControlButton(
+                                cellStart,
+                                self.epgView.top + self.epgView.cellHeight * idx,
+                                cellWidth - 2,
+                                self.epgView.cellHeight - 2,
+                                title,
+                                noFocusTexture=noFocusTexture,
+                                focusTexture=focusTexture
+                            )
+
+                            #find previous control on the same position
+                            self.removeControlOnsamePosition(idx, control)
+
+                            self.controlAndProgramList.append(ControlAndProgram(control, program))
+                            controls = [elem.control for elem in [ControlAndProgram(control, program)]]
+
+                            focusFunction = self._findControlAt
+                            focusControl = focusFunction(self.focusPoint)
+                            self.addControls(controls)
+                            if focusControl is not None:
+                                debug('onRedrawEPG - setFocus %d' % focusControl.getId())
+                                self.setFocus(focusControl)
+
+                            self.ignoreMissingControlIds.extend([elem.control.getId() for elem in self.controlAndProgramList])
+
+                            if focusControl is None and len(self.controlAndProgramList) > 0:
+                                self.setFocus(self.controlAndProgramList[0].control)
+
+                self.redrawingEPG = False
+
+    def removeControlOnsamePosition(self, idx, control):
+        print "removeControlOnsamePosition ----------------> "
+        for i, c in enumerate(self.channelRows[idx]):
+            controlX = control.getX()
+            if controlX >= c.getX() and controlX <= c.getX()+ c.getWidth():
+                for j, d in enumerate(self.controlAndProgramList):
+                    if d.control.getId() == c.getId():
+                        del self.controlAndProgramList[j]
+                self.removeControl(c)
+                del self.channelRows[idx][i]
+
+
+
 
     def _clearEpg(self):
         controls = [elem.control for elem in self.controlAndProgramList]
@@ -751,6 +874,8 @@ class TVGuide(xbmcgui.WindowXML):
         if success:
             self.notification = Notification(self.database, ADDON.getAddonInfo('path'))
             self.onRedrawEPG(0, self.viewStartDate)
+            #todo: uncomment this
+            #self.source.startSync()
 
     def onSourceProgressUpdate(self, percentageComplete):
         control = self.getControl(self.C_MAIN_LOADING_PROGRESS)
@@ -911,7 +1036,9 @@ class TVGuide(xbmcgui.WindowXML):
     def setControlText(self, controlId, text):
         control = self.getControl(controlId)
         if control:
-            control.setText(text)
+            pass
+            #todo: see if this func is useful at all
+            #control.setText(text)
 
     def updateTimebar(self, scheduleTimer=True):
         try:
@@ -1369,3 +1496,6 @@ class ChooseStreamAddonDialog(xbmcgui.WindowXMLDialog):
     @buggalo.buggalo_try_except({'method': 'ChooseStreamAddonDialog.onFocus'})
     def onFocus(self, controlId):
         pass
+
+
+
